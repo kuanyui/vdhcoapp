@@ -100,6 +100,10 @@ target_dist_dir_rel=$dist_dir_name/$target_os/$target_arch
 target_dist_dir=$PWD/$target_dist_dir_rel
 dist_dir=$PWD/$dist_dir_name
 
+if [ $target_os != "linux" ] && [ $use_system_ffmpeg == 1 ]; then
+  error "Flag --use-system-ffmpeg is only available when target OS is linux"
+fi
+
 if [ $target_os == "win7" ]; then
   target_node=10
 fi
@@ -223,6 +227,7 @@ if [ $publish == 1 ]; then
   exit 0
 fi
 
+
 if [ $build_all == 1 ]; then
   if [ $host != "mac-arm64" ]; then
     error "Can only build all targets on Apple Silicon"
@@ -233,6 +238,10 @@ if [ $build_all == 1 ]; then
   do
     log "Building for $target"
     ./build.sh --target $target
+    if [ $target_os == "linux" ]; then
+      log "Building for $target (without ffmpeg)"
+      ./build.sh --target $target --use-system-ffmpeg
+    fi
   done
 
   # Ensuring Rosetta is installed
@@ -264,6 +273,7 @@ log "Skipping bundling: $skip_bundling"
 log "Skipping packaging: $skip_packaging"
 log "Skipping signing: $skip_signing"
 log "Skipping notary: $skip_notary"
+log "Use System FFmpeg: $use_system_ffmpeg"
 log "Node version: $target_node"
 log "Installation destination: $target_dist_dir_rel"
 
@@ -279,11 +289,16 @@ yq . -o yaml ./config.toml | \
   yq e ".target.node = \"$target_node\"" -o json \
   > $target_dist_dir/config.json
 
-out_deb_file="$package_binary_name-$meta_version-$target.deb"
-out_bz2_file="$package_binary_name-$meta_version-$target.tar.bz2"
-out_pkg_file="$package_binary_name-$meta_version-$target-installer.pkg"
-out_dmg_file="$package_binary_name-$meta_version-$target.dmg"
-out_win_file="$package_binary_name-$meta_version-$target-installer.exe"
+variety_suffix=""
+if [ $use_system_ffmpeg == 1 ]; then
+  variety_suffix="-no-ffmpeg"
+fi
+
+out_deb_file="${package_binary_name}-${meta_version}-${target}${variety_suffix}.deb"
+out_bz2_file="${package_binary_name}-${meta_version}-${target}${variety_suffix}.tar.bz2"
+out_pkg_file="${package_binary_name}-${meta_version}-${target}-installer.pkg"
+out_dmg_file="${package_binary_name}-${meta_version}-${target}.dmg"
+out_win_file="${package_binary_name}-${meta_version}-${target}-installer.exe"
 
 if [ ! $skip_bundling == 1 ]; then
   # This could be done by pkg directly, but esbuild is more tweakable.
@@ -360,9 +375,10 @@ if [ ! $skip_packaging == 1 ]; then
       yq e ".package = \"$meta_id\"" |\
       yq e ".description = \"$meta_description\"" |\
       yq e ".architecture = \"$deb_arch\"" |\
-      yq e ".depends = \"$deb_depends\"" |\
-      yq e ".version = \"$meta_version\"" -o yaml > $target_dist_dir/deb/DEBIAN/control
-
+      yq e ".version = \"$meta_version\"" > $target_dist_dir/deb/DEBIAN/control
+    if [ $deb_depends != "" ]; then
+      yq e ".depends = \"$deb_depends\"" -i $target_dist_dir/deb/DEBIAN/control
+    fi
     ejs -f $target_dist_dir/config.json ./assets/linux/prerm.ejs \
       > $target_dist_dir/deb/DEBIAN/prerm
     chmod +x $target_dist_dir/deb/DEBIAN/prerm
