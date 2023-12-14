@@ -46,19 +46,21 @@ skip_signing=0
 skip_bundling=0
 skip_notary=0
 target_node=18
+use_system_ffmpeg=0
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
     -h|--help)
       echo "Usage:"
-      echo "--all              # Build all targets. Only works from a Apple Silicon host"
-      echo "--publish          # make the built packages available online"
-      echo "--skip-bundling    # skip bundling JS code into binary. Packaging will reuse already built binaries"
-      echo "--skip-packaging   # skip packaging operations (including signing)"
-      echo "--skip-signing     # do not sign the binaries"
-      echo "--skip-notary      # do not send pkg to Apple's notary service"
-      echo "--force-node10     # use node 10. Automatic for win7-* and *-i686"
-      echo "--target <os-arch> # os: linux / mac / windows / win7, arch: x86_64 / i686 / arm64"
+      echo "--all                 # Build all targets. Only works from a Apple Silicon host"
+      echo "--publish             # make the built packages available online"
+      echo "--skip-bundling       # skip bundling JS code into binary. Packaging will reuse already built binaries"
+      echo "--skip-packaging      # skip packaging operations (including signing)"
+      echo "--skip-signing        # do not sign the binaries"
+      echo "--skip-notary         # do not send pkg to Apple's notary service"
+      echo "--use-system-ffmpeg   # do not ship ffmpeg binaries, use ffmpeg provided by system instead (only available when target is linux)"
+      echo "--force-node10        # use node 10. Automatic for win7-* and *-i686"
+      echo "--target <os-arch>    # os: linux / mac / windows / win7, arch: x86_64 / i686 / arm64"
       exit 0
       ;;
     --all) build_all=1 ;;
@@ -68,6 +70,7 @@ while [[ "$#" -gt 0 ]]; do
     --skip-signing) skip_signing=1 ; skip_notary=1 ;;
     --force-node10) target_node=10 ;;
     --skip-notary) skip_notary=1 ;;
+    --use-system-ffmpeg) use_system_ffmpeg=1 ;;
     --target) target="$2"; shift ;;
     *) error "Unknown parameter passed: $1" ;;
   esac
@@ -186,11 +189,17 @@ eval $(yq ./config.toml -o shell)
 if [ $publish == 1 ]; then
   files=(
     "dist/linux/i686/$package_binary_name-$meta_version-linux-i686.tar.bz2"
+    "dist/linux/i686/$package_binary_name-$meta_version-linux-i686-no-ffmpeg.tar.bz2"
     "dist/linux/i686/$package_binary_name-$meta_version-linux-i686.deb"
+    "dist/linux/i686/$package_binary_name-$meta_version-linux-i686-no-ffmpeg.deb"
     "dist/linux/x86_64/$package_binary_name-$meta_version-linux-x86_64.tar.bz2"
+    "dist/linux/x86_64/$package_binary_name-$meta_version-linux-x86_64-no-ffmpeg.tar.bz2"
     "dist/linux/x86_64/$package_binary_name-$meta_version-linux-x86_64.deb"
+    "dist/linux/x86_64/$package_binary_name-$meta_version-linux-x86_64-no-ffmpeg.deb"
     "dist/linux/aarch64/$package_binary_name-$meta_version-linux-aarch64.tar.bz2"
+    "dist/linux/aarch64/$package_binary_name-$meta_version-linux-aarch64-no-ffmpeg.tar.bz2"
     "dist/linux/aarch64/$package_binary_name-$meta_version-linux-aarch64.deb"
+    "dist/linux/aarch64/$package_binary_name-$meta_version-linux-aarch64-no-ffmpeg.deb"
     "dist/mac/x86_64/$package_binary_name-$meta_version-mac-x86_64.dmg"
     "dist/mac/x86_64/$package_binary_name-$meta_version-mac-x86_64-installer.pkg"
     "dist/mac/arm64/$package_binary_name-$meta_version-mac-arm64.dmg"
@@ -218,7 +227,7 @@ if [ $build_all == 1 ]; then
   if [ $host != "mac-arm64" ]; then
     error "Can only build all targets on Apple Silicon"
   fi
-
+  // NOTE: when $build_all == 1, donno how can `linux-i686` be built...
   targets=("mac-arm64" "linux-x86_64" "linux-aarch64" "windows-x86_64")
   for target in "${targets[@]}"
   do
@@ -312,39 +321,46 @@ else
   log "Skipping bundling"
 fi
 
-if [ ! -d "$dist_dir/$ffmpeg_target" ]; then
-  log "Retrieving ffmpeg"
-  ffmpeg_url_base="https://github.com/aclap-dev/ffmpeg-static-builder/releases/download/"
-  ffmpeg_url=$ffmpeg_url_base/$package_ffmpeg_build_id/$ffmpeg_target.tar.bz2
-  ffmpeg_tarball=$dist_dir/ffmpeg.tar.bz2
-  wget --show-progress -c -O $ffmpeg_tarball $ffmpeg_url
-  (cd $dist_dir && tar -xf $ffmpeg_tarball)
-  rm $ffmpeg_tarball
-else
-  log "ffmpeg already downloaded"
-fi
+if [ ! $use_system_ffmpeg == 1 ]; then
+  if [ ! -d "$dist_dir/$ffmpeg_target" ]; then
+    log "Retrieving ffmpeg"
+    ffmpeg_url_base="https://github.com/aclap-dev/ffmpeg-static-builder/releases/download/"
+    ffmpeg_url=$ffmpeg_url_base/$package_ffmpeg_build_id/$ffmpeg_target.tar.bz2
+    ffmpeg_tarball=$dist_dir/ffmpeg.tar.bz2
+    wget --show-progress -c -O $ffmpeg_tarball $ffmpeg_url
+    (cd $dist_dir && tar -xf $ffmpeg_tarball)
+    rm $ffmpeg_tarball
+  else
+    log "ffmpeg already downloaded"
+  fi
 
-cp $dist_dir/$ffmpeg_target/ffmpeg$exe_extension \
-  $dist_dir/$ffmpeg_target/ffprobe$exe_extension \
-  $target_dist_dir/
+  cp $dist_dir/$ffmpeg_target/ffmpeg$exe_extension \
+    $dist_dir/$ffmpeg_target/ffprobe$exe_extension \
+    $target_dist_dir/
+fi
 
 if [ ! $skip_packaging == 1 ]; then
 
   log "Packaging v$meta_version for $target"
-
   if [ $target_os == "linux" ]; then
     mkdir -p $target_dist_dir/deb/opt/$package_binary_name
     mkdir -p $target_dist_dir/deb/DEBIAN
+    deb_depends="ffmpeg"
+    if [ ! $use_system_ffmpeg == 1 ]; then
+      deb_depends=""
+      cp $target_dist_dir/ffmpeg \
+        $target_dist_dir/ffprobe \
+        $target_dist_dir/deb/opt/$package_binary_name
+    fi
     cp LICENSE.txt README.md app/node_modules/open/xdg-open \
       $target_dist_dir/$package_binary_name \
-      $target_dist_dir/ffmpeg \
-      $target_dist_dir/ffprobe \
       $target_dist_dir/deb/opt/$package_binary_name
 
     yq ".package.deb" ./config.toml -o yaml | \
       yq e ".package = \"$meta_id\"" |\
       yq e ".description = \"$meta_description\"" |\
       yq e ".architecture = \"$deb_arch\"" |\
+      yq e ".depends = \"$deb_depends\"" |\
       yq e ".version = \"$meta_version\"" -o yaml > $target_dist_dir/deb/DEBIAN/control
 
     ejs -f $target_dist_dir/config.json ./assets/linux/prerm.ejs \
@@ -521,8 +537,10 @@ fi
 
 if [ $target_os == "linux" ]; then
   log "Binary available: $target_dist_dir_rel/$package_binary_name"
-  log "Binary available: $target_dist_dir_rel/ffmpeg"
-  log "Binary available: $target_dist_dir_rel/ffprobe"
+  if [ ! $use_system_ffmpeg == 1 ]; then
+    log "Binary available: $target_dist_dir_rel/ffmpeg"
+    log "Binary available: $target_dist_dir_rel/ffprobe"
+  fi
   if [ ! $skip_packaging == 1 ]; then
     log "Deb file available: $target_dist_dir_rel/$out_deb_file"
     log "Tarball available: $target_dist_dir_rel/$out_bz2_file"

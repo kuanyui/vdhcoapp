@@ -5,14 +5,29 @@ const path = require('path');
 
 const logger = require('./logger');
 const rpc = require('./weh-rpc');
+const findexe = require('./findexecutable');
 
 const exec_dir = path.dirname(process.execPath);
-let ffmpeg = path.join(exec_dir, "ffmpeg");
-let ffprobe = path.join(exec_dir, "ffprobe");
+let ffmpeg = ensureProgramExt(path.join(exec_dir, "ffmpeg"));
+let ffprobe = ensureProgramExt(path.join(exec_dir, "ffprobe"));
 
-if (os.platform() == "win32") {
-  ffmpeg += ".exe";
-  ffprobe += ".exe";
+function ensureProgramExt(programPath) {
+  if (os.platform() == "win32") {
+    return programPath + ".exe";
+  }
+  return programPath;
+}
+
+if (!findexe.fileExistsSync(ffmpeg)) {
+  ffmpeg = findexe.findExecutableFullPath("ffmpeg")
+}
+if (!findexe.fileExistsSync(ffprobe)) {
+  ffprobe = findexe.findExecutableFullPath("ffprobe")
+}
+
+if (!findexe.fileExistsSync(ffmpeg)) {
+  logger.error("ffmpeg not found. Please ensure if ffmpeg is installed and try again.");
+  process.exit(1);
 }
 
 // Record all started processes, and kill them if the coapp
