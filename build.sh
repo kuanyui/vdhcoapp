@@ -46,7 +46,6 @@ skip_signing=0
 skip_bundling=0
 skip_notary=0
 target_node=18
-use_system_ffmpeg=0
 
 while [[ "$#" -gt 0 ]]; do
   case $1 in
@@ -58,7 +57,6 @@ while [[ "$#" -gt 0 ]]; do
       echo "--skip-packaging      # skip packaging operations (including signing)"
       echo "--skip-signing        # do not sign the binaries"
       echo "--skip-notary         # do not send pkg to Apple's notary service"
-      echo "--use-system-ffmpeg   # do not ship ffmpeg binaries, use ffmpeg provided by system instead (only available when target is linux)"
       echo "--force-node10        # use node 10. Automatic for win7-* and *-i686"
       echo "--target <os-arch>    # os: linux / mac / windows / win7, arch: x86_64 / i686 / arm64"
       exit 0
@@ -70,7 +68,6 @@ while [[ "$#" -gt 0 ]]; do
     --skip-signing) skip_signing=1 ; skip_notary=1 ;;
     --force-node10) target_node=10 ;;
     --skip-notary) skip_notary=1 ;;
-    --use-system-ffmpeg) use_system_ffmpeg=1 ;;
     --target) target="$2"; shift ;;
     *) error "Unknown parameter passed: $1" ;;
   esac
@@ -100,9 +97,6 @@ target_dist_dir_rel=$dist_dir_name/$target_os/$target_arch
 target_dist_dir=$PWD/$target_dist_dir_rel
 dist_dir=$PWD/$dist_dir_name
 
-if [ $target_os != "linux" ] && [ $use_system_ffmpeg == 1 ]; then
-  error "Flag --use-system-ffmpeg is only available when target OS is linux"
-fi
 
 if [ $target_os == "win7" ]; then
   target_node=10
@@ -238,10 +232,6 @@ if [ $build_all == 1 ]; then
   do
     log "Building for $target"
     ./build.sh --target $target
-    if [ $target_os == "linux" ]; then
-      log "Building for $target (without ffmpeg)"
-      ./build.sh --target $target --use-system-ffmpeg
-    fi
   done
 
   # Ensuring Rosetta is installed
@@ -273,7 +263,6 @@ log "Skipping bundling: $skip_bundling"
 log "Skipping packaging: $skip_packaging"
 log "Skipping signing: $skip_signing"
 log "Skipping notary: $skip_notary"
-log "Use System FFmpeg: $use_system_ffmpeg"
 log "Node version: $target_node"
 log "Installation destination: $target_dist_dir_rel"
 
@@ -290,12 +279,11 @@ yq . -o yaml ./config.toml | \
   > $target_dist_dir/config.json
 
 variety_suffix=""
-if [ $use_system_ffmpeg == 1 ]; then
-  variety_suffix="-no-ffmpeg"
-fi
 
 out_deb_file="${package_binary_name}-${meta_version}-${target}${variety_suffix}.deb"
 out_bz2_file="${package_binary_name}-${meta_version}-${target}${variety_suffix}.tar.bz2"
+out_noffmpeg_deb_file="${package_binary_name}-no-ffmpeg-${meta_version}-${target}${variety_suffix}.deb"
+out_noffmpeg_bz2_file="${package_binary_name}-no-ffmpeg-${meta_version}-${target}${variety_suffix}.tar.bz2"
 out_pkg_file="${package_binary_name}-${meta_version}-${target}-installer.pkg"
 out_dmg_file="${package_binary_name}-${meta_version}-${target}.dmg"
 out_win_file="${package_binary_name}-${meta_version}-${target}-installer.exe"
@@ -336,49 +324,84 @@ else
   log "Skipping bundling"
 fi
 
-if [ ! $use_system_ffmpeg == 1 ]; then
-  if [ ! -d "$dist_dir/$ffmpeg_target" ]; then
-    log "Retrieving ffmpeg"
-    ffmpeg_url_base="https://github.com/aclap-dev/ffmpeg-static-builder/releases/download/"
-    ffmpeg_url=$ffmpeg_url_base/$package_ffmpeg_build_id/$ffmpeg_target.tar.bz2
-    ffmpeg_tarball=$dist_dir/ffmpeg.tar.bz2
-    wget --show-progress -c -O $ffmpeg_tarball $ffmpeg_url
-    (cd $dist_dir && tar -xf $ffmpeg_tarball)
-    rm $ffmpeg_tarball
-  else
-    log "ffmpeg already downloaded"
-  fi
-
-  cp $dist_dir/$ffmpeg_target/ffmpeg$exe_extension \
-    $dist_dir/$ffmpeg_target/ffprobe$exe_extension \
-    $target_dist_dir/
+if [ ! -d "$dist_dir/$ffmpeg_target" ]; then
+  log "Retrieving ffmpeg"
+  ffmpeg_url_base="https://github.com/aclap-dev/ffmpeg-static-builder/releases/download/"
+  ffmpeg_url=$ffmpeg_url_base/$package_ffmpeg_build_id/$ffmpeg_target.tar.bz2
+  ffmpeg_tarball=$dist_dir/ffmpeg.tar.bz2
+  wget --show-progress -c -O $ffmpeg_tarball $ffmpeg_url
+  (cd $dist_dir && tar -xf $ffmpeg_tarball)
+  rm $ffmpeg_tarball
+else
+  log "ffmpeg already downloaded"
 fi
+
+cp $dist_dir/$ffmpeg_target/ffmpeg$exe_extension \
+  $dist_dir/$ffmpeg_target/ffprobe$exe_extension \
+  $target_dist_dir/
 
 if [ ! $skip_packaging == 1 ]; then
 
   log "Packaging v$meta_version for $target"
+  # ===============================================
+  # LINUX
+  # ===============================================
   if [ $target_os == "linux" ]; then
     mkdir -p $target_dist_dir/deb/opt/$package_binary_name
     mkdir -p $target_dist_dir/deb/DEBIAN
-    deb_depends="ffmpeg"
-    if [ ! $use_system_ffmpeg == 1 ]; then
-      deb_depends=""
-      cp $target_dist_dir/ffmpeg \
-        $target_dist_dir/ffprobe \
-        $target_dist_dir/deb/opt/$package_binary_name
-    fi
+    # --------------------------------
+    # Variation: No ffmpeg shipped
+    # --------------------------------
     cp LICENSE.txt README.md app/node_modules/open/xdg-open \
       $target_dist_dir/$package_binary_name \
       $target_dist_dir/deb/opt/$package_binary_name
 
     yq ".package.deb" ./config.toml -o yaml | \
-      yq e ".package = \"$meta_id\"" |\
-      yq e ".description = \"$meta_description\"" |\
-      yq e ".architecture = \"$deb_arch\"" |\
-      yq e ".version = \"$meta_version\"" > $target_dist_dir/deb/DEBIAN/control
-    if [ $deb_depends != "" ]; then
-      yq e ".depends = \"$deb_depends\"" -i $target_dist_dir/deb/DEBIAN/control
+      yq e ".package = \"${meta_id}.noffmpeg\"" |\
+      yq e ".conflicts = \"${meta_id}\"" |\
+      yq e ".description = \"${meta_description} (No pre-built ffmpeg binary shipped; use ffmpeg on system instead)\"" |\
+      yq e ".architecture = \"${deb_arch}\"" |\
+      yq e ".depends = \"ffmpeg\"" |\
+      yq e ".version = \"${meta_version}\"" > $target_dist_dir/deb/DEBIAN/control
+
+    ejs -f $target_dist_dir/config.json ./assets/linux/prerm.ejs \
+      > $target_dist_dir/deb/DEBIAN/prerm
+    chmod +x $target_dist_dir/deb/DEBIAN/prerm
+
+    ejs -f $target_dist_dir/config.json ./assets/linux/postinst.ejs \
+      > $target_dist_dir/deb/DEBIAN/postinst
+    chmod +x $target_dist_dir/deb/DEBIAN/postinst
+
+    log "Building .deb file"
+    dpkg-deb --build $target_dist_dir/deb $target_dist_dir/$out_noffmpeg_deb_file
+
+    rm -rf $target_dist_dir/$package_binary_name-$meta_version
+    mkdir $target_dist_dir/$package_binary_name-$meta_version
+    cp $target_dist_dir/deb/opt/$package_binary_name/* \
+      $target_dist_dir/$package_binary_name-$meta_version
+    log "Building .tar.bz2 file"
+    tar_extra=""
+    if [ $host_os == "mac" ]; then
+      tar_extra="--no-xattrs --no-mac-metadata"
     fi
+    (cd $target_dist_dir && tar -cvjS $tar_extra -f $out_noffmpeg_bz2_file $package_binary_name-$meta_version)
+
+    # --------------------------------
+    # Variation: ffmpeg binary shipped
+    # --------------------------------
+    cp LICENSE.txt README.md app/node_modules/open/xdg-open \
+      $target_dist_dir/$package_binary_name \
+      $target_dist_dir/ffmpeg \
+      $target_dist_dir/ffprobe \
+      $target_dist_dir/deb/opt/$package_binary_name
+
+    yq ".package.deb" ./config.toml -o yaml | \
+      yq e ".package = \"${meta_id}\"" |\
+      yq e ".conflicts = \"${meta_id}.noffmpeg\"" |\
+      yq e ".description = \"${meta_description} (With pre-built ffmpeg shipped.)\"" |\
+      yq e ".architecture = \"${deb_arch}\"" |\
+      yq e ".version = \"${meta_version}\"" > $target_dist_dir/deb/DEBIAN/control
+
     ejs -f $target_dist_dir/config.json ./assets/linux/prerm.ejs \
       > $target_dist_dir/deb/DEBIAN/prerm
     chmod +x $target_dist_dir/deb/DEBIAN/prerm
@@ -403,8 +426,12 @@ if [ ! $skip_packaging == 1 ]; then
 
     rm -rf $target_dist_dir/$package_binary_name-$meta_version
     rm -rf $target_dist_dir/deb
+
   fi
 
+  # ===============================================
+  # Mac
+  # ===============================================
   if [ $target_os == "mac" ]; then
     if ! [ -x "$(command -v create-dmg)" ]; then
       error "create-dmg not installed"
@@ -502,6 +529,10 @@ if [ ! $skip_packaging == 1 ]; then
     fi
   fi
 
+  # ===============================================
+  # Windows
+  # ===============================================
+
   if [ $node_os == "windows" ]; then
     install_dir=$target_dist_dir/install_dir
     mkdir -p $install_dir
@@ -553,13 +584,13 @@ fi
 
 if [ $target_os == "linux" ]; then
   log "Binary available: $target_dist_dir_rel/$package_binary_name"
-  if [ ! $use_system_ffmpeg == 1 ]; then
-    log "Binary available: $target_dist_dir_rel/ffmpeg"
-    log "Binary available: $target_dist_dir_rel/ffprobe"
-  fi
+  log "Binary available: $target_dist_dir_rel/ffmpeg"
+  log "Binary available: $target_dist_dir_rel/ffprobe"
   if [ ! $skip_packaging == 1 ]; then
     log "Deb file available: $target_dist_dir_rel/$out_deb_file"
+    log "Deb file available: $target_dist_dir_rel/$out_noffmpeg_deb_file"
     log "Tarball available: $target_dist_dir_rel/$out_bz2_file"
+    log "Tarball available: $target_dist_dir_rel/$out_noffmpeg_bz2_file"
   fi
 fi
 
