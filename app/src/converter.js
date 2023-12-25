@@ -23,14 +23,14 @@ if (!fileExistsSync(ffprobe)) {
 function findExecutableFullPath(programName, extraPath = "") {
   programName = ensureProgramExt(programName);
   const envPath = (process.env.PATH || '');
-  const pathArr = envPath.split(path.delimiter)
+  const pathArr = envPath.split(path.delimiter);
   if (extraPath) {
-    pathArr.unshift(extraPath)
+    pathArr.unshift(extraPath);
   }
   const foundExecutablePath = pathArr
-    .map(x => path.join(x, programName))
-    .find(x => fileExistsSync(x));
-  return foundExecutablePath || ''
+    .map((x) => path.join(x, programName))
+    .find((x) => fileExistsSync(x));
+  return foundExecutablePath || '';
 }
 
 function fileExistsSync (filePath) {
