@@ -9,7 +9,7 @@ const rpc = require('./weh-rpc');
 
 const exec_dir = path.dirname(process.execPath);
 
-const use_prebuilt_ffmpeg = fileExistsSync(ensureProgramExt(path.join(exec_dir, "ffmpeg")))
+const use_prebuilt_ffmpeg = fileExistsSync(ensureProgramExt(path.join(exec_dir, "ffmpeg")));
 const ffmpeg = findExecutableFullPath("ffmpeg", exec_dir);
 const ffprobe = findExecutableFullPath("ffprobe", exec_dir);
 
@@ -100,7 +100,7 @@ exports.star_listening = () => {
 
   rpc.listen({
     "use_prebuilt_ffmpeg": () => {
-      return Promise.resolve(use_prebuilt_ffmpeg)
+      return Promise.resolve(use_prebuilt_ffmpeg);
     },
     "abortConvert": (pid) => {
       let child = convertChildren.get(pid);

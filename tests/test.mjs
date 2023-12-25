@@ -221,7 +221,7 @@ if (!old_coapp) {
       console.warn("Skipping format test as it fails on Linux and Windows");
     }
   } else {
-    console.warn("Skipping codecs and format tests as it fails when using ffmpeg provided by system.")
+    console.warn("Skipping codecs and format tests as it fails when using ffmpeg provided by system.");
   }
 }
 
