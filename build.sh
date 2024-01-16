@@ -232,7 +232,6 @@ if [ $build_all == 1 ]; then
   if [ $host != "mac-arm64" ]; then
     error "Can only build all targets on Apple Silicon"
   fi
-  // NOTE: when $build_all == 1, donno how can `linux-i686` be built...
   targets=("mac-arm64" "linux-x86_64" "linux-aarch64" "windows-x86_64")
   for target in "${targets[@]}"
   do
@@ -366,7 +365,7 @@ if [ ! $skip_packaging == 1 ]; then
     yq ".package.deb" ./config.toml -o yaml | \
       yq e ".package = \"${meta_id}.noffmpeg\"" |\
       yq e ".conflicts = \"${meta_id}\"" |\
-      yq e ".description = \"${meta_description} (No pre-built ffmpeg binary shipped; use ffmpeg on system instead)\"" |\
+      yq e ".description = \"${meta_description} (does not come with pre-built ffmpeg. Relies on system's ffmpeg)\"" |\
       yq e ".architecture = \"${deb_arch}\"" |\
       yq e ".depends = \"ffmpeg\"" |\
       yq e ".version = \"${meta_version}\"" > $target_dist_dir/deb/DEBIAN/control
